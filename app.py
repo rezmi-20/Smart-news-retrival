@@ -198,33 +198,93 @@ section[data-testid="stSidebar"] { display: none; }
   font-style: italic;
 }
 
-/* ── Streamlit input override ── */
-.stTextInput > div > div > input {
-  background: #fff !important;
-  border: 1.5px solid var(--ink) !important;
+/* ── Streamlit input override — aggressive ── */
+input[type="text"],
+input[class*="st-"],
+.stTextInput input,
+.stTextInput > label + div > div > input,
+div[data-baseweb="input"] input {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  border: 1.5px solid #111111 !important;
   border-radius: 2px !important;
   font-family: 'Inter', sans-serif !important;
   font-size: 0.95rem !important;
-  color: var(--ink) !important;
+  color: #111111 !important;
   padding: 10px 14px !important;
+  caret-color: #111111 !important;
 }
-.stTextInput > div > div > input:focus {
+input[type="text"]:focus,
+.stTextInput input:focus,
+div[data-baseweb="input"]:focus-within {
   border-color: var(--red) !important;
-  box-shadow: none !important;
+  box-shadow: 0 0 0 2px rgba(192,57,43,0.15) !important;
+  outline: none !important;
 }
+div[data-baseweb="input"] {
+  background: #ffffff !important;
+  border: 1.5px solid #111111 !important;
+  border-radius: 2px !important;
+}
+div[data-baseweb="base-input"] {
+  background: #ffffff !important;
+}
+
+/* ── Button ── */
+.stFormSubmitButton > button,
 .stButton > button {
-  background: var(--ink) !important;
-  color: var(--cream) !important;
+  background-color: #111111 !important;
+  color: #f5f0e8 !important;
   border: none !important;
   border-radius: 2px !important;
   font-family: 'Inter', sans-serif !important;
   font-weight: 600 !important;
   font-size: 0.85rem !important;
-  letter-spacing: 1px !important;
-  padding: 10px 22px !important;
-  transition: background 0.2s !important;
+  letter-spacing: 1.5px !important;
+  text-transform: uppercase !important;
+  padding: 12px 24px !important;
+  width: 100% !important;
+  transition: background-color 0.2s !important;
+  box-shadow: none !important;
 }
-.stButton > button:hover { background: var(--red) !important; }
+.stFormSubmitButton > button:hover,
+.stButton > button:hover {
+  background-color: #c0392b !important;
+  color: #ffffff !important;
+}
+.stFormSubmitButton > button:focus,
+.stButton > button:focus {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* ── Checkbox ── */
+.stCheckbox {
+  display: flex !important;
+  align-items: center !important;
+  margin-top: 2px !important;
+}
+.stCheckbox label {
+  font-family: 'Inter', sans-serif !important;
+  font-size: 0.82rem !important;
+  font-weight: 500 !important;
+  color: #111111 !important;
+  letter-spacing: 0.5px !important;
+  cursor: pointer !important;
+}
+.stCheckbox input[type="checkbox"] {
+  accent-color: #c0392b !important;
+  width: 15px !important;
+  height: 15px !important;
+  cursor: pointer !important;
+}
+
+/* ── Remove Streamlit form border ── */
+.stForm {
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
 
 /* ── Status messages ── */
 .status-bar {
@@ -254,6 +314,15 @@ section[data-testid="stSidebar"] { display: none; }
 
 /* ── Loader ── */
 .stSpinner > div { border-top-color: var(--red) !important; }
+
+/* ── Remove Streamlit label from hidden text inputs ── */
+.stTextInput > label { display: none !important; }
+
+/* ── Form container padding fix ── */
+.stForm > div:first-child { padding: 0 !important; gap: 0 !important; }
+
+/* ── Column gap tighten in search row ── */
+[data-testid="column"] { padding: 0 4px !important; }
 </style>
 """, unsafe_allow_html=True)
 
