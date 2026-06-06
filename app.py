@@ -1,579 +1,302 @@
 import streamlit as st
+import html as html_lib
 import re
 import numpy as np
 import requests
 import xml.etree.ElementTree as ET
 import nltk
+import random
+from datetime import datetime
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ─────────────────────────────────────────────
-#  PAGE CONFIG  (must be first Streamlit call)
-# ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="The News Dispatch",
-    page_icon="📰",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+# ── Page config ──────────────────────────────────────────────────────────────
+st.set_page_config(page_title="The News Dispatch", page_icon="📰", layout="wide",
+                   initial_sidebar_state="collapsed")
 
-# ─────────────────────────────────────────────
-#  GLOBAL CSS INJECTION
-# ─────────────────────────────────────────────
+# ── CSS  (only touches non-widget elements + overrides that are reliable) ────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Inter:wght@400;500;600&display=swap');
 
-/* ── Reset Streamlit chrome ── */
 #MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 0 !important; max-width: 100% !important; }
-section[data-testid="stSidebar"] { display: none; }
+.block-container { padding: 1rem 2rem 2rem !important; max-width: 1200px !important; margin: auto !important; }
 
-/* ── Root palette ── */
-:root {
-  --cream: #f5f0e8;
-  --ink:   #111111;
-  --red:   #c0392b;
-  --mid:   #888888;
-  --card-bg: #ffffff;
-  --border: #e2ddd5;
-}
+/* masthead */
+.masthead { text-align:center; border-bottom: 3px double #111; padding-bottom:16px; margin-bottom:0; }
+.masthead-date { font-family:'Inter',sans-serif; font-size:.75rem; letter-spacing:2px; text-transform:uppercase; color:#888; }
+.masthead-logo { font-family:'Playfair Display',serif; font-size:clamp(2.2rem,5vw,4rem); color:#111; margin:4px 0; line-height:1; }
+.masthead-sub { font-family:'Inter',sans-serif; font-size:.75rem; color:#888; letter-spacing:1px; }
 
-/* ── Page background ── */
-.stApp { background: var(--cream) !important; }
+/* divider */
+.divider { border:none; border-top:1px solid #ccc; margin:8px 0; }
 
-/* ── Masthead ── */
-.masthead {
-  border-bottom: 3px double var(--ink);
-  text-align: center;
-  padding: 32px 40px 16px;
-  margin-bottom: 0;
-}
-.masthead-date {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.78rem;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--mid);
-  margin-bottom: 8px;
-}
-.masthead-title {
-  font-family: 'Playfair Display', serif;
-  font-size: clamp(2.6rem, 6vw, 4.8rem);
-  font-weight: 700;
-  color: var(--ink);
-  line-height: 1;
-  letter-spacing: -2px;
-  margin: 0;
-}
-.masthead-tagline {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8rem;
-  color: var(--mid);
-  margin-top: 8px;
-  letter-spacing: 1px;
-}
+/* status */
+.status { font-family:'Inter',sans-serif; font-size:.8rem; color:#666; margin:6px 0 12px; }
 
-/* ── Thin rule below masthead ── */
-.rule-thin {
-  border: none;
-  border-top: 1px solid var(--ink);
-  margin: 6px 40px;
-}
+/* cards grid */
+.grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; margin-top:16px; }
 
-/* ── Search bar ── */
-.search-wrap {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 16px 40px;
-  border-bottom: 1px solid var(--border);
-  background: var(--cream);
-}
+/* individual card */
+.ncard { background:#fff; border:1px solid #e5e0d8; border-radius:6px; overflow:hidden;
+         display:flex; flex-direction:column; transition:transform .2s,box-shadow .2s; }
+.ncard:hover { transform:translateY(-5px); box-shadow:0 10px 30px rgba(0,0,0,.12); }
+.ncard img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; }
+.ncard-body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:6px; flex:1; }
+.ncard-cat { font-family:'Inter',sans-serif; font-size:.65rem; font-weight:700;
+             letter-spacing:1.5px; text-transform:uppercase; color:#c0392b; }
+.ncard-title { font-family:'Playfair Display',serif; font-size:1.05rem; line-height:1.3;
+               color:#111; margin:0; }
+.ncard-link { margin-top:auto; padding-top:10px; font-family:'Inter',sans-serif;
+              font-size:.75rem; font-weight:600; color:#c0392b; text-decoration:none; }
+.ncard-score { font-family:'Inter',sans-serif; font-size:.7rem; color:#999; font-style:italic; }
 
-/* ── Category pills ── */
-.category-bar {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 0 40px 16px;
-  border-bottom: 2px solid var(--ink);
-}
-.cat-pill {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  padding: 4px 14px;
-  border-radius: 20px;
-  border: 1px solid var(--ink);
-  cursor: pointer;
-  background: transparent;
-  color: var(--ink);
-  transition: background 0.2s, color 0.2s;
-}
-.cat-pill:hover { background: var(--ink); color: var(--cream); }
-.cat-pill.active { background: var(--ink); color: var(--cream); }
+/* hero card: first result spans 2 cols */
+.hero { grid-column: span 2; }
+.hero img { aspect-ratio:21/9; }
+.hero .ncard-title { font-size:1.6rem; }
 
-/* ── Grid ── */
-.news-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 2px;
-  padding: 2px 40px 40px;
-  margin-top: 18px;
-}
-.news-grid.has-hero {
-  grid-template-columns: repeat(3, 1fr);
-}
+/* semantic pill */
+.sem-pill { background:#fff3f3; border-left:3px solid #c0392b; padding:8px 14px;
+            font-family:'Inter',sans-serif; font-size:.8rem; color:#555;
+            margin-bottom:10px; border-radius:0 4px 4px 0; }
 
-/* ── Cards ── */
-.ncard {
-  background: var(--card-bg);
-  border-radius: 4px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: box-shadow 0.25s ease, transform 0.25s ease;
-  border: 1px solid var(--border);
-}
-.ncard:hover {
-  box-shadow: 0 8px 32px rgba(0,0,0,0.13);
-  transform: translateY(-4px);
-  z-index: 10;
-}
-.ncard.hero {
-  grid-column: span 2;
-}
-.ncard img {
-  width: 100%;
-  aspect-ratio: 16/9;
-  object-fit: cover;
-  display: block;
-}
-.ncard.hero img { aspect-ratio: 21/9; }
-.ncard-body {
-  padding: 16px 18px 18px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ncard-cat {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: var(--red);
-}
-.ncard-title {
-  font-family: 'Playfair Display', serif;
-  font-weight: 700;
-  font-size: 1.05rem;
-  line-height: 1.3;
-  color: var(--ink);
-  margin: 0;
-}
-.ncard.hero .ncard-title { font-size: 1.6rem; }
-.ncard-link {
-  display: block;
-  margin-top: auto;
-  padding-top: 10px;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--red);
-  text-decoration: none;
-  letter-spacing: 0.5px;
-}
-.ncard-score {
-  font-family: 'Inter', sans-serif;
-  font-size: 0.7rem;
-  color: var(--mid);
-  font-style: italic;
-}
-
-/* ── Streamlit input override — aggressive ── */
-input[type="text"],
-input[class*="st-"],
-.stTextInput input,
-.stTextInput > label + div > div > input,
-div[data-baseweb="input"] input {
-  background: #ffffff !important;
-  background-color: #ffffff !important;
-  border: 1.5px solid #111111 !important;
-  border-radius: 2px !important;
-  font-family: 'Inter', sans-serif !important;
-  font-size: 0.95rem !important;
-  color: #111111 !important;
-  padding: 10px 14px !important;
-  caret-color: #111111 !important;
-}
-input[type="text"]:focus,
-.stTextInput input:focus,
-div[data-baseweb="input"]:focus-within {
-  border-color: var(--red) !important;
-  box-shadow: 0 0 0 2px rgba(192,57,43,0.15) !important;
-  outline: none !important;
-}
-div[data-baseweb="input"] {
-  background: #ffffff !important;
-  border: 1.5px solid #111111 !important;
-  border-radius: 2px !important;
-}
-div[data-baseweb="base-input"] {
-  background: #ffffff !important;
-}
-
-/* ── Button ── */
-.stFormSubmitButton > button,
-.stButton > button {
-  background-color: #111111 !important;
-  color: #f5f0e8 !important;
-  border: none !important;
-  border-radius: 2px !important;
-  font-family: 'Inter', sans-serif !important;
-  font-weight: 600 !important;
-  font-size: 0.85rem !important;
-  letter-spacing: 1.5px !important;
-  text-transform: uppercase !important;
-  padding: 12px 24px !important;
-  width: 100% !important;
-  transition: background-color 0.2s !important;
-  box-shadow: none !important;
-}
-.stFormSubmitButton > button:hover,
-.stButton > button:hover {
-  background-color: #c0392b !important;
-  color: #ffffff !important;
-}
-.stFormSubmitButton > button:focus,
-.stButton > button:focus {
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-/* ── Checkbox ── */
-.stCheckbox {
-  display: flex !important;
-  align-items: center !important;
-  margin-top: 2px !important;
-}
-.stCheckbox label {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 0.82rem !important;
-  font-weight: 500 !important;
-  color: #111111 !important;
-  letter-spacing: 0.5px !important;
-  cursor: pointer !important;
-}
-.stCheckbox input[type="checkbox"] {
-  accent-color: #c0392b !important;
-  width: 15px !important;
-  height: 15px !important;
-  cursor: pointer !important;
-}
-
-/* ── Remove Streamlit form border ── */
-.stForm {
-  border: none !important;
-  background: transparent !important;
-  padding: 0 !important;
-}
-
-/* ── Status messages ── */
-.status-bar {
-  padding: 10px 40px;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8rem;
-  color: var(--mid);
-  border-bottom: 1px solid var(--border);
-}
-.no-results {
-  text-align: center;
-  padding: 60px 40px;
-  font-family: 'Playfair Display', serif;
-  font-size: 1.6rem;
-  font-style: italic;
-  color: var(--mid);
-}
-.expanded-pill {
-  background: #fff3f3;
-  border-left: 3px solid var(--red);
-  padding: 8px 16px;
-  margin: 0 40px 12px;
-  font-family: 'Inter', sans-serif;
-  font-size: 0.8rem;
-  color: var(--mid);
-}
-
-/* ── Loader ── */
-.stSpinner > div { border-top-color: var(--red) !important; }
-
-/* ── Remove Streamlit label from hidden text inputs ── */
-.stTextInput > label { display: none !important; }
-
-/* ── Form container padding fix ── */
-.stForm > div:first-child { padding: 0 !important; gap: 0 !important; }
-
-/* ── Column gap tighten in search row ── */
-[data-testid="column"] { padding: 0 4px !important; }
+/* no results */
+.no-res { text-align:center; padding:60px 20px;
+          font-family:'Playfair Display',serif; font-size:1.5rem;
+          font-style:italic; color:#aaa; }
 </style>
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-#  NLTK SETUP
-# ─────────────────────────────────────────────
+# ── NLTK ─────────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def download_nltk():
-    for pkg in ['stopwords', 'wordnet', 'omw-1.4', 'punkt', 'punkt_tab']:
-        nltk.download(pkg, quiet=True)
-
+    for p in ['stopwords','wordnet','omw-1.4','punkt','punkt_tab']:
+        nltk.download(p, quiet=True)
 download_nltk()
 
-# ─────────────────────────────────────────────
-#  CATEGORY IMAGE POOL  (curated, varied)
-# ─────────────────────────────────────────────
-import random
-CAT_IMGS = {
-    'WORLD': [
-        'https://images.unsplash.com/photo-1491336477066-31156b5e4f35?w=800&q=80',
-        'https://images.unsplash.com/photo-1522199710521-72d69614c702?w=800&q=80',
-        'https://images.unsplash.com/photo-1521295121783-8a321d551ad2?w=800&q=80',
-    ],
-    'NATION': [
-        'https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=800&q=80',
-        'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80',
-    ],
-    'BUSINESS': [
-        'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800&q=80',
-        'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800&q=80',
-        'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=800&q=80',
-    ],
-    'TECHNOLOGY': [
-        'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80',
-        'https://images.unsplash.com/photo-1531297484001-80022131f5a1?w=800&q=80',
-        'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=800&q=80',
-    ],
-    'LATEST': [
-        'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80',
-        'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&q=80',
-    ],
+# ── Image pools ──────────────────────────────────────────────────────────────
+IMGS = {
+    'WORLD':      ['https://images.unsplash.com/photo-1521295121783-8a321d551ad2?w=800&q=80',
+                   'https://images.unsplash.com/photo-1522199710521-72d69614c702?w=800&q=80'],
+    'NATION':     ['https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=800&q=80',
+                   'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80'],
+    'BUSINESS':   ['https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800&q=80',
+                   'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800&q=80'],
+    'TECHNOLOGY': ['https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80',
+                   'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=800&q=80'],
+    'SPORTS':     ['https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&q=80',
+                   'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&q=80'],
+    'HEALTH':     ['https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=800&q=80',
+                   'https://images.unsplash.com/photo-1584515933487-779824d29309?w=800&q=80'],
+    'LATEST':     ['https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80',
+                   'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&q=80'],
 }
-def get_image(cat):
-    pool = CAT_IMGS.get(cat, CAT_IMGS['LATEST'])
-    return random.choice(pool)
+def get_img(cat):
+    return random.choice(IMGS.get(cat, IMGS['LATEST']))
 
-# ─────────────────────────────────────────────
-#  LIVE NEWS FETCHER
-# ─────────────────────────────────────────────
+# ── Fetch live news ───────────────────────────────────────────────────────────
+FEEDS = [
+    ('LATEST',      'https://news.google.com/rss'),
+    ('WORLD',       'https://news.google.com/rss/headlines/section/topic/WORLD'),
+    ('NATION',      'https://news.google.com/rss/headlines/section/topic/NATION'),
+    ('BUSINESS',    'https://news.google.com/rss/headlines/section/topic/BUSINESS'),
+    ('TECHNOLOGY',  'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY'),
+    ('SPORTS',      'https://news.google.com/rss/headlines/section/topic/SPORTS'),
+    ('HEALTH',      'https://news.google.com/rss/headlines/section/topic/HEALTH'),
+]
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_live_news():
-    feeds = [
-        ('LATEST',     'https://news.google.com/rss'),
-        ('WORLD',      'https://news.google.com/rss/headlines/section/topic/WORLD'),
-        ('NATION',     'https://news.google.com/rss/headlines/section/topic/NATION'),
-        ('BUSINESS',   'https://news.google.com/rss/headlines/section/topic/BUSINESS'),
-        ('TECHNOLOGY', 'https://news.google.com/rss/headlines/section/topic/TECHNOLOGY'),
-        ('SPORTS',     'https://news.google.com/rss/headlines/section/topic/SPORTS'),
-        ('HEALTH',     'https://news.google.com/rss/headlines/section/topic/HEALTH'),
-    ]
     corpus = {}
     doc_id = 1
-    for cat, url in feeds:
+    for cat, url in FEEDS:
         try:
             res = requests.get(url, timeout=10, headers={'User-Agent': 'Mozilla/5.0'})
             root = ET.fromstring(res.content)
             for item in root.findall('.//item')[:25]:
-                title_el = item.find('title')
-                link_el  = item.find('link')
-                if title_el is None or link_el is None:
-                    continue
-                raw_title = title_el.text or ''
-                # Strip " - Source Name" suffix from Google News titles
-                title = re.sub(r'\s*-\s*[^-]+$', '', raw_title).strip()
-                corpus[doc_id] = {
-                    'title':    title,
-                    'raw':      raw_title,
-                    'link':     link_el.text,
-                    'category': cat,
-                    'image':    get_image(cat),
-                }
+                t = item.find('title')
+                l = item.find('link')
+                if t is None or l is None: continue
+                raw = t.text or ''
+                title = re.sub(r'\s*-\s*[^-]+$', '', raw).strip()
+                corpus[doc_id] = {'title': title, 'link': l.text,
+                                  'category': cat, 'image': get_img(cat)}
                 doc_id += 1
         except Exception:
             pass
     return corpus
 
-# ─────────────────────────────────────────────
-#  NLP  &  INDEX
-# ─────────────────────────────────────────────
+# ── NLP pipeline ─────────────────────────────────────────────────────────────
 lemmatizer = WordNetLemmatizer()
-_stop = set(stopwords.words('english')) | {'vs', 'say', 'said', 'says', 'uk', 'mr', 'new'}
+STOP = set(stopwords.words('english')) | {'vs','say','said','says','uk','mr','new'}
 
-def _clean(text: str) -> list[str]:
-    text = text.lower()
-    text = re.sub(r'[^a-z\s]', ' ', text)
-    tokens = word_tokenize(text)
-    return [lemmatizer.lemmatize(w) for w in tokens if w not in _stop and len(w) > 2]
+def clean(text):
+    text = re.sub(r'[^a-z\s]', ' ', text.lower())
+    return [lemmatizer.lemmatize(w) for w in word_tokenize(text)
+            if w not in STOP and len(w) > 2]
 
 @st.cache_data(show_spinner=False)
-def build_index(corpus_keys, corpus_vals):
-    """
-    Build TF-IDF index.
-    IMPORTANT FIX: document text = title tokens + category keyword repeated
-    so category-level queries like 'technology' always match.
-    """
+def build_index(keys, vals):
     doc_ids, texts = [], []
-    for did, article in zip(corpus_keys, corpus_vals):
-        tokens = _clean(article['title'])
-        # Append category as extra searchable tokens (fixes the 'technology' bug)
-        tokens += _clean(article['category'])
+    for did, art in zip(keys, vals):
+        toks = clean(art['title']) + clean(art['category'])
         doc_ids.append(did)
-        texts.append(" ".join(tokens))
-
+        texts.append(" ".join(toks))
     vec = TfidfVectorizer(ngram_range=(1, 2), min_df=1)
     mat = vec.fit_transform(texts)
     return doc_ids, vec, mat
 
-def preprocess_query(q: str) -> str:
-    return " ".join(_clean(q))
-
-# ─────────────────────────────────────────────
-#  SEARCH FUNCTIONS
-# ─────────────────────────────────────────────
-def tfidf_search(query: str, corpus, doc_ids, vectorizer, matrix, top_k=12):
-    pq = preprocess_query(query)
-    if not pq:
-        return []
-    qvec = vectorizer.transform([pq])
-    sims = cosine_similarity(qvec, matrix).flatten()
+def tfidf_search(query, corpus, doc_ids, vec, mat, cat_filter='ALL', top_k=12):
+    pq = " ".join(clean(query))
+    if not pq: return []
+    sims = cosine_similarity(vec.transform([pq]), mat).flatten()
     ranked = np.argsort(sims)[::-1]
-    return [(doc_ids[i], float(sims[i])) for i in ranked if sims[i] > 0.001][:top_k]
+    out = []
+    for i in ranked:
+        if sims[i] < 0.001: break
+        did = doc_ids[i]
+        art = corpus[did]
+        if cat_filter != 'ALL' and art['category'] != cat_filter:
+            continue
+        out.append((did, float(sims[i])))
+        if len(out) >= top_k: break
+    return out
 
-def semantic_expand(query: str) -> str:
-    tokens = _clean(query)
-    expanded = set(tokens)
-    for tok in tokens:
-        for syn in wordnet.synsets(tok):
-            # Only use first 2 synsets to avoid explosion
+def semantic_expand(query):
+    toks = clean(query)
+    exp = set(toks)
+    for tok in toks:
+        for syn in list(wordnet.synsets(tok))[:2]:
             for lemma in list(syn.lemmas())[:3]:
-                expanded.update(_clean(lemma.name().replace('_', ' ')))
-    return " ".join(expanded)
+                exp.update(clean(lemma.name().replace('_',' ')))
+    return " ".join(exp)
 
-# ─────────────────────────────────────────────
-#  CARD HTML
-# ─────────────────────────────────────────────
-def card_html(article, score=None, hero=False):
-    hero_cls = 'hero' if hero else ''
-    score_html = f'<div class="ncard-score">Relevance: {score:.3f}</div>' if score else ''
-    # Clean up title for display (strip trailing source " - XYZ")
-    display_title = article['title']
-    return f"""
-<div class="ncard {hero_cls}">
-  <img src="{article['image']}" alt="news" loading="lazy"
-       onerror="this.src='https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80'">
-  <div class="ncard-body">
-    <span class="ncard-cat">{article['category']}</span>
-    <h3 class="ncard-title">{display_title}</h3>
-    {score_html}
-    <a class="ncard-link" href="{article['link']}" target="_blank">Read full story →</a>
-  </div>
-</div>"""
-
-# ─────────────────────────────────────────────
-#  FETCH & INDEX  (with loading state)
-# ─────────────────────────────────────────────
+# ── Load data ─────────────────────────────────────────────────────────────────
 with st.spinner("Fetching today's dispatch..."):
-    news_corpus = fetch_live_news()
+    corpus = fetch_live_news()
 
-if not news_corpus:
-    st.error("Could not fetch live news. Check your internet connection.")
+if not corpus:
+    st.error("Could not fetch news. Check your internet connection.")
     st.stop()
 
-keys  = list(news_corpus.keys())
-vals  = list(news_corpus.values())
-doc_ids, tfidf_vec, tfidf_mat = build_index(tuple(keys), tuple(vals))
+keys  = tuple(corpus.keys())
+vals  = tuple(corpus.values())
+doc_ids, tfidf_vec, tfidf_mat = build_index(keys, vals)
 
-# ─────────────────────────────────────────────
-#  MASTHEAD
-# ─────────────────────────────────────────────
-from datetime import datetime
-today = datetime.now().strftime("%A, %B %d, %Y")
+# ── Session state ─────────────────────────────────────────────────────────────
+if 'category' not in st.session_state:
+    st.session_state.category = 'ALL'
+if 'query' not in st.session_state:
+    st.session_state.query = ''
+if 'semantic' not in st.session_state:
+    st.session_state.semantic = False
 
+# ── MASTHEAD ──────────────────────────────────────────────────────────────────
+today = datetime.now().strftime("%A, %B %d, %Y").upper()
 st.markdown(f"""
 <div class="masthead">
   <div class="masthead-date">{today}</div>
-  <h1 class="masthead-title">The News Dispatch</h1>
-  <div class="masthead-tagline">Live · Intelligent · Searchable</div>
+  <div class="masthead-logo">The News Dispatch</div>
+  <div class="masthead-sub">Live &middot; Intelligent &middot; Searchable &nbsp;|&nbsp; {len(corpus)} articles indexed</div>
 </div>
-<hr class="rule-thin">
+<hr class="divider">
 """, unsafe_allow_html=True)
 
-# ─────────────────────────────────────────────
-#  SEARCH BAR
-# ─────────────────────────────────────────────
-with st.form(key='search_form', clear_on_submit=False):
-    c1, c2, c3 = st.columns([5, 1, 1.2])
-    with c1:
-        query = st.text_input("query", placeholder="Search today's news — e.g.  iran, technology, economy ...",
-                              label_visibility="collapsed")
-    with c2:
-        submitted = st.form_submit_button("Search")
-    with c3:
-        use_semantic = st.checkbox("Semantic Expansion", value=False)
+# ── SEARCH FORM ───────────────────────────────────────────────────────────────
+with st.form("search_form"):
+    col_q, col_btn = st.columns([5, 1])
+    with col_q:
+        q_input = st.text_input("Search", value=st.session_state.query,
+                                placeholder="Search news — e.g. technology, iran, economy ...",
+                                label_visibility="collapsed")
+    with col_btn:
+        submitted = st.form_submit_button("Search", use_container_width=True)
+    use_sem = st.checkbox("Enable Semantic WordNet Expansion", value=st.session_state.semantic)
 
-# ─────────────────────────────────────────────
-#  CATEGORY PILLS  (visual only)
-# ─────────────────────────────────────────────
-cats = ['ALL', 'WORLD', 'NATION', 'BUSINESS', 'TECHNOLOGY', 'SPORTS', 'HEALTH']
-pills = "".join(f'<span class="cat-pill{"  active" if c=="ALL" else ""}">{c}</span>' for c in cats)
-st.markdown(f'<div class="category-bar">{pills}</div>', unsafe_allow_html=True)
+if submitted:
+    st.session_state.query    = q_input.strip()
+    st.session_state.semantic = use_sem
+    st.session_state.category = 'ALL'   # reset category on new search
 
-# ─────────────────────────────────────────────
-#  RESULTS LOGIC
-# ─────────────────────────────────────────────
-if submitted and query.strip():
-    expanded_q = None
-    if use_semantic:
-        expanded_q = semantic_expand(query)
-        search_q   = expanded_q
+# ── CATEGORY FILTER ───────────────────────────────────────────────────────────
+cats = ['ALL','WORLD','NATION','BUSINESS','TECHNOLOGY','SPORTS','HEALTH']
+cat_cols = st.columns(len(cats))
+for i, cat in enumerate(cats):
+    with cat_cols[i]:
+        label = f"**{cat}**" if cat == st.session_state.category else cat
+        if st.button(label, key=f"cat_{cat}", use_container_width=True):
+            st.session_state.category = cat
+
+st.markdown("<hr class='divider'>", unsafe_allow_html=True)
+
+# ── SEARCH & RENDER ───────────────────────────────────────────────────────────
+active_query = st.session_state.query
+active_cat   = st.session_state.category
+
+def card_html(art, score=None, hero=False):
+    cls        = "ncard hero" if hero else "ncard"
+    safe_title = html_lib.escape(art['title'])
+    safe_cat   = html_lib.escape(art['category'])
+    safe_link  = art['link'].replace('"', '%22')
+    safe_img   = art['image'].replace('"', '%22')
+    score_line = f'<div class="ncard-score">Relevance: {score:.3f}</div>' if score else ''
+    return (
+        f'<a class="{cls}" href="{safe_link}" target="_blank" style="text-decoration:none;">'
+        f'<img src="{safe_img}" loading="lazy" '
+        f'onerror="this.src=\'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80\'">'
+        f'<div class="ncard-body">'
+        f'<span class="ncard-cat">{safe_cat}</span>'
+        f'<h3 class="ncard-title">{safe_title}</h3>'
+        f'{score_line}'
+        f'<span class="ncard-link">Read full story \u2192</span>'
+        f'</div></a>'
+    )
+
+if active_query:
+    # Run search
+    expand_note = ""
+    if st.session_state.semantic:
+        expanded = semantic_expand(active_query)
+        results  = tfidf_search(expanded, corpus, doc_ids, tfidf_vec, tfidf_mat, active_cat)
+        expand_note = f'<div class="sem-pill">Semantic expansion: <em>{expanded}</em></div>'
     else:
-        search_q = query
+        results  = tfidf_search(active_query, corpus, doc_ids, tfidf_vec, tfidf_mat, active_cat)
 
-    results = tfidf_search(search_q, news_corpus, doc_ids, tfidf_vec, tfidf_mat)
+    if expand_note:
+        st.markdown(expand_note, unsafe_allow_html=True)
 
-    if expanded_q:
-        st.markdown(f'<div class="expanded-pill">Semantic expansion: {expanded_q}</div>',
-                    unsafe_allow_html=True)
-
-    st.markdown(f'<div class="status-bar">Found <strong>{len(results)}</strong> results for '
-                f'<em>"{query}"</em> — indexing {len(news_corpus)} live articles</div>',
-                unsafe_allow_html=True)
+    st.markdown(f'<div class="status">Found <strong>{len(results)}</strong> results for '
+                f'<em>"{active_query}"</em>'
+                + (f' in <strong>{active_cat}</strong>' if active_cat != 'ALL' else '') +
+                '</div>', unsafe_allow_html=True)
 
     if not results:
-        st.markdown('<div class="no-results">No stories found. Try enabling Semantic Expansion or a broader term.</div>',
+        st.markdown('<div class="no-res">No stories found — try Semantic Expansion or a broader term.</div>',
                     unsafe_allow_html=True)
     else:
-        cards_html = '<div class="news-grid">'
+        html = '<div class="grid">'
         for i, (did, score) in enumerate(results):
-            art = news_corpus[did]
-            cards_html += card_html(art, score=score, hero=(i == 0))
-        cards_html += '</div>'
-        st.markdown(cards_html, unsafe_allow_html=True)
+            html += card_html(corpus[did], score=score, hero=(i == 0))
+        html += '</div>'
+        st.markdown(html, unsafe_allow_html=True)
 
 else:
-    # ── Homepage: show latest articles with hero
-    st.markdown(f'<div class="status-bar">Today\'s dispatch — {len(news_corpus)} live articles indexed</div>',
-                unsafe_allow_html=True)
+    # Homepage: show latest by selected category
+    if active_cat == 'ALL':
+        sample = list(corpus.values())[:12]
+    else:
+        sample = [a for a in corpus.values() if a['category'] == active_cat][:12]
 
-    sample = list(news_corpus.values())[:12]
-    cards_html = '<div class="news-grid">'
+    st.markdown(f'<div class="status">Showing latest'
+                + (f' <strong>{active_cat}</strong>' if active_cat != 'ALL' else '') +
+                f' stories — {len(corpus)} articles indexed</div>', unsafe_allow_html=True)
+
+    html = '<div class="grid">'
     for i, art in enumerate(sample):
-        cards_html += card_html(art, hero=(i == 0))
-    cards_html += '</div>'
-    st.markdown(cards_html, unsafe_allow_html=True)
+        html += card_html(art, hero=(i == 0))
+    html += '</div>'
+    st.markdown(html, unsafe_allow_html=True)
