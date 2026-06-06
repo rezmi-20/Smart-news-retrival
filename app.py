@@ -103,7 +103,7 @@ _img_stop = {
 }
 
 def get_img_for_article(title: str, category: str) -> str:
-    """Build a relevant Unsplash URL from the article title's key nouns."""
+    """Build a relevant image URL from the article title's key nouns via loremflickr."""
     words = [
         w for w in re.sub(r'[^a-z\s]', '', title.lower()).split()
         if w not in _img_stop and len(w) > 3
@@ -112,8 +112,8 @@ def get_img_for_article(title: str, category: str) -> str:
         keywords = ','.join(words[:3])
     else:
         keywords = CAT_FALLBACK.get(category, 'news')
-    # Unsplash Source API — free, no key needed, returns a relevant image
-    return f'https://source.unsplash.com/800x450/?{keywords}'
+    # loremflickr.com — free, active, returns relevant Flickr photos by keyword
+    return f'https://loremflickr.com/800/450/{keywords}'
 
 # ── Fetch live news ───────────────────────────────────────────────────────────
 FEEDS = [
@@ -193,13 +193,21 @@ def semantic_expand(query):
                 exp.update(clean(lemma.name().replace('_',' ')))
     return " ".join(exp)
 
-# ── Load data ─────────────────────────────────────────────────────────────────
+# ── Load data ─────────────────────────────────────────────────────────────
 with st.spinner("Fetching today's dispatch..."):
     corpus = fetch_live_news()
 
 if not corpus:
     st.error("Could not fetch news. Check your internet connection.")
     st.stop()
+
+# ── Sidebar refresh ──────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### The News Dispatch")
+    st.caption(f"{len(corpus)} articles indexed")
+    if st.button("Refresh News Feed", use_container_width=True):
+        fetch_live_news.clear()
+        st.rerun()
 
 keys  = tuple(corpus.keys())
 vals  = tuple(corpus.values())
