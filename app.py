@@ -5,7 +5,6 @@ import numpy as np
 import requests
 import xml.etree.ElementTree as ET
 import nltk
-import random
 from datetime import datetime
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
@@ -78,25 +77,43 @@ def download_nltk():
         nltk.download(p, quiet=True)
 download_nltk()
 
-# ── Image pools ──────────────────────────────────────────────────────────────
-IMGS = {
-    'WORLD':      ['https://images.unsplash.com/photo-1521295121783-8a321d551ad2?w=800&q=80',
-                   'https://images.unsplash.com/photo-1522199710521-72d69614c702?w=800&q=80'],
-    'NATION':     ['https://images.unsplash.com/photo-1529107386315-e1a2ed48a620?w=800&q=80',
-                   'https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80'],
-    'BUSINESS':   ['https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=800&q=80',
-                   'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=800&q=80'],
-    'TECHNOLOGY': ['https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80',
-                   'https://images.unsplash.com/photo-1488590528505-98d2b5aba04b?w=800&q=80'],
-    'SPORTS':     ['https://images.unsplash.com/photo-1461896836934-ffe607ba8211?w=800&q=80',
-                   'https://images.unsplash.com/photo-1517649763962-0c623066013b?w=800&q=80'],
-    'HEALTH':     ['https://images.unsplash.com/photo-1505751172876-fa1923c5c528?w=800&q=80',
-                   'https://images.unsplash.com/photo-1584515933487-779824d29309?w=800&q=80'],
-    'LATEST':     ['https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=800&q=80',
-                   'https://images.unsplash.com/photo-1585829365295-ab7cd400c167?w=800&q=80'],
+# ── Image generation from article title keywords ─────────────────────────────
+# Unsplash Source API: returns a relevant photo for given comma-separated keywords.
+# No API key required. Falls back to a category keyword if title yields nothing.
+CAT_FALLBACK = {
+    'WORLD':      'global,world,politics',
+    'NATION':     'government,nation,policy',
+    'BUSINESS':   'finance,business,economy',
+    'TECHNOLOGY': 'technology,digital,innovation',
+    'SPORTS':     'sports,athlete,game',
+    'HEALTH':     'health,medicine,hospital',
+    'LATEST':     'news,newspaper,journalism',
 }
-def get_img(cat):
-    return random.choice(IMGS.get(cat, IMGS['LATEST']))
+
+_img_stop = {
+    'the','and','for','are','but','not','you','all','any','can','had',
+    'her','was','one','our','out','day','get','has','him','his','how',
+    'man','new','now','old','see','two','way','who','did','its','let',
+    'put','say','she','too','use','that','this','with','from','they',
+    'will','been','have','more','over','such','than','then','them',
+    'well','were','what','when','also','into','just','like','make',
+    'most','some','time','very','after','could','first','their','there',
+    'which','would','about','other','these','those','being','since',
+    'amid','says','said','amid','amid','amid',
+}
+
+def get_img_for_article(title: str, category: str) -> str:
+    """Build a relevant Unsplash URL from the article title's key nouns."""
+    words = [
+        w for w in re.sub(r'[^a-z\s]', '', title.lower()).split()
+        if w not in _img_stop and len(w) > 3
+    ]
+    if words:
+        keywords = ','.join(words[:3])
+    else:
+        keywords = CAT_FALLBACK.get(category, 'news')
+    # Unsplash Source API — free, no key needed, returns a relevant image
+    return f'https://source.unsplash.com/800x450/?{keywords}'
 
 # ── Fetch live news ───────────────────────────────────────────────────────────
 FEEDS = [
@@ -124,7 +141,8 @@ def fetch_live_news():
                 raw = t.text or ''
                 title = re.sub(r'\s*-\s*[^-]+$', '', raw).strip()
                 corpus[doc_id] = {'title': title, 'link': l.text,
-                                  'category': cat, 'image': get_img(cat)}
+                                  'category': cat,
+                                  'image': get_img_for_article(title, cat)}
                 doc_id += 1
         except Exception:
             pass
